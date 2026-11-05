@@ -266,6 +266,12 @@ tr.hidden-row{display:none}
     </div>
     <button class="btn" id="btnRunMp" style="background:linear-gradient(135deg,#0ea5e9,#0369a1)">🔮 執行大盤預測回測</button>
     <button type="button" class="list-toggle-btn" id="btnShowMp" style="width:100%;margin-top:6px;padding:6px;font-size:12px;text-align:center">查看目前評分卡</button>
+    <label for="iMpPref" style="margin:8px 0 4px;font-size:11px;color:#aaa">持股策略偏好（批次分析的建議持股用這個）</label>
+    <select id="iMpPref" title="2026-11-04 台股大盤回測（2009-11 起樣本外）：平衡＝風險模型・溫和（持股50～70%，年化約6.8%、回撤約−18%）；控制回撤＝評分卡自動挑選（風險模型・積極 30～80%，年化約5.9%、回撤約−13%）；報酬優先＝永遠滿倉（年化約11.0%、回撤約−32%）" style="width:100%;padding:6px 8px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#fff;font-size:12px">
+      <option value="balance">平衡（風險模型・溫和，預設）</option>
+      <option value="dd">控制回撤（評分卡自動挑選）</option>
+      <option value="ret">報酬優先（永遠滿倉）</option>
+    </select>
   </div>
   <hr>
   <div class="field">
@@ -2274,6 +2280,7 @@ tr.hidden-row{display:none}
           }).join('<br>') +
           '</div>' +
         '</details>' +
+        monthlyPicksHtml(batchResults) +
         TM.banner +
         filterBar +
         '<div class="summary-wrap"><table class="summary-table">' +
@@ -5446,6 +5453,38 @@ tr.hidden-row{display:none}
     try { take(matchedBtHotCombos(r), BT_HOT_COMBOS, 'F', 'moon', 'moon', 'moonBy'); } catch (e) {}
     return out;
   }
+  // ── 2026-11-04 本月建議組合（比照美股）：主力＝命中 S 或 W、排除⚠️（外資持股近20日減少≥1%／融資近20日減少≥20%／S命中但P/E<12倍），依多方力道取前20檔；
+  //    籌碼加持＝主力裡外資持股增加≥1%或融資增加≥20%。台股投資組合模擬待上櫃回測後驗證
+  var PICK_N = 20;
+  function monthlyPicks(results) {
+    var info = results.map(function(r) {
+      var t = r.tech || {}, ms = [], mw = [];
+      try { ms = matchedStockPickCombos(r); } catch (e) {}
+      try { mw = matchedBtWinCombos(r); } catch (e) {}
+      var lowPe = ms.length && !mw.length && r.peRange && r.peRange.raw != null && r.peRange.raw > 0 && r.peRange.raw < 12;
+      return { r: r, sw: ms.length > 0 || mw.length > 0, warn: (t.fhChg20 != null && t.fhChg20 <= -1) || (t.mgChg20 != null && t.mgChg20 <= -20) || lowPe,
+               up: (t.fhChg20 != null && t.fhChg20 >= 1) || (t.mgChg20 != null && t.mgChg20 >= 20) };
+    });
+    var main = info.filter(function(x) { return x.sw && !x.warn; }).sort(function(a, b) { return b.r.total - a.r.total; });
+    return { main: main.slice(0, PICK_N).map(function(x) { return x.r; }), chip: main.filter(function(x) { return x.up; }).slice(0, PICK_N).map(function(x) { return x.r; }) };
+  }
+  function monthlyPicksHtml(results) {
+    var P = monthlyPicks(results);
+    var li = function(arr) { return arr.length ? arr.map(function(r, k) { return '<span style="white-space:nowrap">' + (k + 1) + '. <b style="color:#fff">' + r.stockId + '</b> ' + r.name + ' <span style="color:#888">(' + r.total + ')</span></span>'; }).join('　') : '<span style="color:#666">沒有符合的股票</span>'; };
+    return '<details style="margin:8px 16px;padding:8px 12px;background:rgba(74,158,255,.06);border:1px solid rgba(74,158,255,.25);border-radius:8px;font-size:12px;color:#cfd8e3">' +
+      '<summary style="cursor:pointer;color:#8ec5ff;font-weight:700">📦 本月建議組合（主力 ' + P.main.length + ' 檔／籌碼加持 ' + P.chip.length + ' 檔；每20個交易日換股一次、等權重）</summary>' +
+      '<div style="color:#888;font-size:11px;margin:6px 0">比照美股三年投資組合模擬的做法（美股：主力年化約23%、等權大盤約17%）。<b style="color:#ffd54f">出場：抱滿20個交易日再換股，不設固定停損</b>（美股三年回測：停損−8% 年化約砍半）。⚠️ 台股的投資組合模擬與出場規則待上櫃六段回測後驗證，僅供參考。括號內為多方力道。</div>' +
+      '<div style="margin:4px 0"><b style="color:#ffd54f">🚀 主力組合</b>（命中 S 或 W，排除⚠️外資持股減少／融資大減／S命中但P/E&lt;12倍）：' + li(P.main) + '</div>' +
+      '<div style="margin:4px 0"><b style="color:#69f0ae">💰 籌碼加持</b>（主力＋外資持股增加≥1%或融資增加≥20%）：' + (batchExtras.chip2 ? li(P.chip) : '<span style="color:#666">需勾「🧮 進階籌碼」</span>') + '</div>' +
+      (P.main.length ? '<button type="button" id="btnPickToMy4" data-ids="' + P.main.map(function(r) { return r.stockId; }).join(',') + '" style="margin-top:6px;padding:4px 10px;font-size:12px;background:#1a6fff;color:#fff;border:none;border-radius:6px;cursor:pointer">📥 主力組合 ' + P.main.length + ' 檔存成「我的清單4」（覆蓋）</button>' : '') +
+      '</details>';
+  }
+  document.addEventListener('click', function(e) {
+    var b = e.target.closest && e.target.closest('#btnPickToMy4'); if (!b) return;
+    var ids = String(b.dataset.ids || '').split(',').filter(Boolean);
+    setCustomList('my4', ids); try { refreshCustomListLabels(); } catch (e2) {}
+    b.textContent = '✅ 已存成「我的清單4」（' + ids.length + ' 檔）';
+  });
   function topMarks(results) {
     var st = results.map(bestStatOf), badge = results.map(function() { return ''; }), lines = [];
     [['win', 'winBy', '🏆', '勝率', '#ffd54f', '最高勝率（S／W 組合 20 日勝率）'], ['moon', 'moonBy', '🚀', '飆股', '#e91e63', '最高飆股機率（F 組合 20 日漲>30% 比例）']].forEach(function(c) {
@@ -6969,9 +7008,106 @@ tr.hidden-row{display:none}
     return [m[0], m[1], sc, parts.join('、')];
   }
   // 大盤指引：把溫度計＋K線位置翻成白話（判定理由、操作建議、接下來要觀察什麼）
+  // ── 2026-11-03 過熱／反彈訊號燈：用大盤預測評分卡的即時讀數（數值＋歷史百分位），四個面向各一盞燈，不另外打 API（跟 PY 版同一套規則）──
+  function heatLights(pr) {
+    if (!pr || pr.err || !pr.det || !pr.det.length) return null;
+    var D = {}; pr.det.forEach(function(d) { D[d.name] = d; });
+    var v = function(nm, dflt) { var d = D[nm]; return d && d.val != null ? d.val : dflt; };
+    var p = function(nm, dflt) { var d = D[nm]; return d && d.pct != null ? d.pct : dflt; };
+    var R = [
+      ['動能', '價格乖離', function() { return p('偏離200日均線%', 0) >= 90 || v('RSI14', 0) > 75; }, '偏離200日均線在歷史前10%或 RSI>75'],
+      ['動能', '散戶槓桿', function() { return p('整體融資偏離一年均值%', 0) >= 90 || p('整體融資近20日變化%', 0) >= 90; }, '整體融資偏離一年均值或近20日增幅在歷史前10%'],
+      ['動能', '外資背離', function() { return (p('外資現貨近20日買賣超(億)', 100) <= 10 || p('外資台指期淨未平倉(口)', 100) <= 10) && p('偏離200日均線%', 0) >= 60; }, '外資現貨或台指期淨部位在歷史最空的10%，指數卻仍在長期均線上方高檔'],
+      ['參考', '避險不足', function() { return p('法人選擇權P/C未平倉比', 100) <= 10 || p('60日波動率%', 100) <= 10; }, '法人 P/C 未平倉比或60日波動率在歷史最低10%（沒人避險）'],
+      ['反彈', '價格超跌', function() { return v('距一年高點%', 0) <= -15 || v('RSI14', 50) < 30; }, '距一年高點跌≥15% 或 RSI<30'],
+      ['警示', '槓桿清洗', function() { return v('整體融資近20日變化%', 0) <= -8; }, '整體融資近20日減少≥8%（斷頭殺完）'],
+      ['反彈', '外資回補', function() { return (p('外資台指期近20日變化(口)', 0) >= 80 && p('外資台指期淨未平倉(口)', 100) <= 40) || p('美元兌台幣近20日變化%', 100) <= 15; }, '外資台指期空單從低檔明顯回補，或台幣近20日升值幅度在歷史前15%'],
+      ['反彈', '恐慌極端', function() { return p('法人選擇權P/C未平倉比', 0) >= 90 || p('60日波動率%', 0) >= 90; }, '法人 P/C 未平倉比或60日波動率在歷史最高10%']];
+    var L = R.map(function(r) { var on = false; try { on = !!r[2](); } catch (e) {} return { kind: r[0], nm: r[1], on: on, why: r[3] }; });
+    return { nh: L.filter(function(x) { return x.kind === '動能' && x.on; }).length, nr: L.filter(function(x) { return x.kind === '反彈' && x.on; }).length, L: L };
+  }
+  // 2026-11-04 台股訊號燈改版（依門檻回測）：🔥動能燈、🟢反彈燈每亮一盞 +10%；⚠️警示燈（槓桿清洗）−10%；ℹ️避險不足僅供參考
+  function heatWarnOn(h) { return h.L.some(function(x) { return x.kind === '警示' && x.on; }); }
+  function heatLightLines(pr) {
+    var h = heatLights(pr);
+    if (!h) return ['・🚦 大盤訊號燈：需要先在「🔮 大盤預測」建立評分卡（訊號燈用評分卡的即時讀數，不另外打 API）'];
+    var row = function(k, icon) { return h.L.filter(function(x) { return x.kind === k; }).map(function(x) { return (x.on ? icon : '⚪') + x.nm; }).join('　'); };
+    var any = h.L.some(function(x) { return x.on; });
+    var vd = heatWarnOn(h) ? '⚠️ 槓桿清洗：融資大減後歷史上60日還再跌約3%，先等融資止穩'
+      : h.nh >= 2 ? '動能延續：歷史上之後1～3個月續強（60日比平常多約4～6%），續抱、可加碼，只是不追高'
+      : h.nr >= 2 ? '反彈條件出現：之後報酬高於平常但震盪大，分批加碼'
+      : !any ? '平靜期（全部不亮）：歷史上之後報酬最低（60日約只有0.3%），正常部位、不必加碼' : '沒有明顯訊號：依建議持股正常操作';
+    var on = h.L.filter(function(x) { return x.on; });
+    return ['・🚦 <b style="color:#ffab40">🔥 動能燈 ' + h.nh + '/3</b>：' + row('動能', '🔥') + '　｜　<b style="color:#69f0ae">🟢 反彈燈 ' + h.nr + '/3</b>：' + row('反彈', '🟢') + '　｜　⚠️ ' + row('警示', '⚠️') + '　｜　參考：' + row('參考', 'ℹ️') + '（效果不明）',
+            '・訊號燈判讀：' + vd + (on.length ? '（亮燈條件：' + on.map(function(x) { return x.nm + '＝' + x.why; }).join('；') + '）' : '')];
+  }
+  function heatAdjust(pos, pr) {
+    var h = heatLights(pr);
+    if (pos == null || !h) return [pos, ''];
+    var w = heatWarnOn(h) ? 1 : 0;
+    if (!(h.nh || h.nr || w)) return [pos, ''];
+    var note = [h.nh ? '動能燈 ' + h.nh + ' 盞 +' + 10 * h.nh + '%' : '', h.nr ? '反彈燈 ' + h.nr + ' 盞 +' + 10 * h.nr + '%' : '', w ? '警示燈（槓桿清洗）−10%' : ''].filter(Boolean).join('、');
+    return [Math.round(Math.max(0, Math.min(100, pos + 10 * (h.nh + h.nr - w))) / 5) * 5, note];
+  }
+  function marketVerdict(mt, kp, pr) {
+    var h = heatLights(pr); if (!h) return null;
+    var tz = mt && mt.zone, kz = kp && kp.zone, cheap = kz === '超賣' || tz === '極冷' || tz === '偏冷';
+    var b = function(t) { return '<b style="color:#ffd54f">' + t + '</b>'; };
+    if (heatWarnOn(h)) return '🧭 綜合判斷：' + b('槓桿清洗中') + '（融資大減）→ 歷史上之後60日還再跌約3%，先不要加碼，等融資止穩';
+    if (h.nh >= 2) return '🧭 綜合判斷：' + b('動能延續') + '（價格與籌碼都熱）→ 歷史上之後1～3個月續強，續抱、不追高';
+    if (cheap && h.nr >= 1) return '🧭 綜合判斷：' + b('價格超賣＋反彈訊號出現') + ' → 歷史上之後報酬高於平常但震盪大，可分批加碼，不要一次滿倉';
+    if (cheap) return '🧭 綜合判斷：' + b('價格偏低') + ' → 可逢低分批，等「恐慌極端」或「外資回補」亮燈再加碼';
+    if (!h.L.some(function(x) { return x.on; })) return '🧭 綜合判斷：' + b('平靜期') + '（訊號燈全不亮）→ 歷史上之後報酬最低，正常部位、不必加碼';
+    return '🧭 綜合判斷：價格與籌碼沒有極端訊號 → 正常部位';
+  }
+  function heatBacktest(cols, raw, X, r, dd) {
+    var n = r.length, idx = [], k = cols.length;
+    for (var i = 0; i < n; i++) {
+      if (!isFinite(r[i])) continue;
+      var c = 0; for (var j = 0; j < k; j++) if (isFinite(X[j][i])) c++;
+      if (c >= Math.max(3, Math.floor(k / 2))) idx.push(i);
+    }
+    if (idx.length < 250) return null;
+    var hs = idx.map(function(i) {
+      return heatLights({ det: cols.map(function(nm, j) { return { name: nm, val: isFinite(raw[j][i]) ? raw[j][i] : null, pct: isFinite(X[j][i]) ? Math.round(X[j][i] * 100) : null }; }) });
+    });
+    var st = function(m, o) {
+      var rr = [], d5 = []; idx.forEach(function(i, t) { if (m(t)) { rr.push(r[i]); d5.push(dd[i]); } });
+      o.n = rr.length;
+      if (rr.length < 20) { o.ret = o.up = o.dd5 = o.mdd = null; return o; }
+      var sum = function(a) { return a.reduce(function(s, x) { return s + x; }, 0); };
+      o.ret = mpRound(sum(rr) / rr.length, 2); o.up = mpRound(rr.filter(function(x) { return x > 0; }).length / rr.length * 100, 1);
+      o.dd5 = mpRound(d5.filter(function(x) { return x <= -5; }).length / d5.length * 100, 1); o.mdd = mpRound(sum(d5) / d5.length, 2);
+      var sel = idx.filter(function(i, t) { return m(t); }); o.ret40 = mpExtMean(40, sel); o.ret60 = mpExtMean(60, sel);
+      return o;
+    };
+    var out = { base: st(function() { return true; }, { name: '全部日子' }) };
+    out.lights = hs[0].L.map(function(L0, j) { return st(function(t) { return hs[t].L[j].on; }, { kind: L0.kind, name: L0.nm, why: L0.why }); });
+    out.hot = [0, 1, 2, 3].map(function(q) { return st(function(t) { return hs[t].nh === q; }, { name: '動能 ' + q + ' 盞' }); });
+    out.reb = [0, 1, 2, 3].map(function(q) { return st(function(t) { return hs[t].nr === q; }, { name: '反彈 ' + q + ' 盞' }); });
+    out.combo = [st(function(t) { return hs[t].nh >= 2; }, { name: '動能≥2盞' }), st(function(t) { return hs[t].nr >= 2; }, { name: '反彈≥2盞' }),
+                 st(function(t) { return heatWarnOn(hs[t]); }, { name: '⚠️ 警示燈亮（槓桿清洗）' }),
+                 st(function(t) { return !hs[t].L.some(function(x) { return x.on; }); }, { name: '全部不亮（平靜期）' })];
+    return out;
+  }
+  function heatBacktestHtml(hb, th, td) {
+    if (!hb || hb.err) return '<div style="color:#888;font-size:11.5px;margin:6px 0">🚦 訊號燈門檻回測：這張評分卡是舊版建立的，請重新按「🔮 執行大盤預測回測」</div>';
+    var b = hb.base, dif = function(x, k) { return x[k] == null || b[k] == null ? null : mpSigned(mpRound(x[k] - b[k], 2), 2); };
+    var col = function(v, good) { return v == null ? '' : 'color:' + ((parseFloat(v) > 0) === good ? '#4caf50' : '#ef5350'); };
+    var tbl = function(L) { return '<table style="border-collapse:collapse;width:100%;margin-bottom:8px"><tr>' + th('項目') + th('天數') + th('之後20日平均報酬%') + th('比全部') + th('之後40日%') + th('比全部(40日)') + th('之後60日%') + th('比全部(60日)') + th('上漲機率%') + th('期間跌≥5%機率%') + th('比全部（跌5）') + th('平均最大跌幅%') + '</tr>' +
+      L.map(function(x) { var d1 = dif(x, 'ret'), d2 = dif(x, 'dd5'), d4 = dif(x, 'ret40'), d6 = dif(x, 'ret60'); return '<tr>' + td((x.kind ? x.kind + '・' : '') + x.name, x.why ? '" title="' + x.why : '') + td(x.n) + td(x.ret) + td(d1, col(d1, true)) + td(x.ret40) + td(d4, col(d4, true)) + td(x.ret60) + td(d6, col(d6, true)) + td(x.up) + td(x.dd5) + td(d2, col(d2, false)) + td(x.mdd) + '</tr>'; }).join('') + '</table>'; };
+    return '<div style="font-size:14px;font-weight:700;color:#fff;margin-top:14px">🚦 訊號燈門檻回測（每天只用當時為止的歷史百分位判斷亮燈，看之後20日大盤表現）</div>' +
+      '<div style="font-size:11.5px;color:#888;margin:4px 0 6px">全部 ' + b.n + ' 天：之後20日平均 ' + b.ret + '%（40日 ' + b.ret40 + '%、60日 ' + b.ret60 + '%）、上漲機率 ' + b.up + '%、期間跌≥5%機率 ' + b.dd5 + '%、平均最大跌幅 ' + b.mdd + '%。動能燈、反彈燈有效＝亮燈時之後報酬高於全部（比全部 為綠色正數）；警示燈有效＝亮燈時之後報酬低於全部。天數不到20天不計。</div>' +
+      tbl(hb.lights) + tbl(hb.hot.concat(hb.reb)) + tbl(hb.combo);
+  }
   function marketGuideLines(mt, kp) {
     var out = [], f1 = function(x) { return (x >= 0 ? '+' : '') + x.toFixed(1); };
     var ps = marketPosition(mt, kp), pr = currentMktPred;
+    var vd_ = marketVerdict(mt, kp, pr); if (vd_) out.push(vd_);
+    if (ps && !(pr && !pr.err && pr.valid && pr.models)) {
+      var ha_ = heatAdjust(ps[0], pr);
+      if (ha_[1] && ha_[0] !== ps[0]) ps = [ha_[0], '依訊號燈調整', ps[2], ps[3] + '；溫度計＋K線原本 ' + ps[0] + '%，' + ha_[1]];
+    }
     if (pr && !pr.err && pr.valid && pr.models) {   // 大盤預測評分卡樣本外驗證有效 → 建議持股改用評分卡
       out.push(mpGuideText(pr, ps ? ps[0] : null));
       ps = null;
@@ -7009,6 +7145,7 @@ tr.hidden-row{display:none}
       if (kz !== '超賣' && !coldT) w.push('最佳時機＝K線「超賣」且溫度計同時「偏冷／極冷」');
       out.push('・接下來觀察：' + w.join('；'));
     }
+    out = out.concat(heatLightLines(currentMktPred));
     return out;
   }
   // ── 大盤預測評分卡：台股的大盤指標（籌碼類收盤後才公布 → 一律用前一個交易日）──
@@ -7041,6 +7178,25 @@ tr.hidden-row{display:none}
     rows.forEach(function(r) { var v = fnum(r[fld]), d = String(r.date || '').slice(0, 10); if (v != null && v > 0 && d.length === 10) last[d] = v; });
     var ds = Object.keys(last).sort();
     return ds.length ? { d: ds, c: [ds.map(function(d) { return last[d]; })] } : null;
+  }
+  // 2026-11-03 出場規則回測（跟 PY 版同一套算法）：mdd20／mfu20＝20日內最低／最高價相對進場價%；ret60d＝持有60日%；
+  // xStop8＝20日內跌破−8%停損否則抱滿20日；xTp20＝漲到+20%停利；xSt8Tp20＝兩者都設（同日都碰到當先停損）；xTrail10＝自最高收盤回落10%出場
+  function exitFeats(data, e) {
+    var out = { mdd20: null, mfu20: null, ret60d: null, xStop8: null, xTp20: null, xSt8Tp20: null, xTrail10: null }, ec = data[e].close;
+    if (!ec || e + 20 >= data.length) return out;
+    var lo = [], hi = [];
+    for (var j = e + 1; j <= e + 20; j++) { lo.push(data[j].low / ec - 1); hi.push(data[j].high / ec - 1); }
+    var r20 = data[e + 20].close / ec - 1;
+    out.mdd20 = Math.min.apply(null, lo) * 100; out.mfu20 = Math.max.apply(null, hi) * 100;
+    if (e + 60 < data.length) out.ret60d = (data[e + 60].close / ec - 1) * 100;
+    var ds = lo.findIndex(function(v) { return v <= -0.08; }), dt = hi.findIndex(function(v) { return v >= 0.20; });
+    out.xStop8 = ds >= 0 ? -8 : r20 * 100;
+    out.xTp20 = dt >= 0 ? 20 : r20 * 100;
+    out.xSt8Tp20 = (ds < 0 && dt < 0) ? r20 * 100 : ((dt < 0 || (ds >= 0 && ds <= dt)) ? -8 : 20);
+    var pk = ec, x = null;
+    for (var k = e + 1; k <= e + 20; k++) { var c = data[k].close; pk = Math.max(pk, c); if (c <= pk * 0.9) { x = c / ec - 1; break; } }
+    out.xTrail10 = (x != null ? x : r20) * 100;
+    return out;
   }
   async function mpFetch(token, years) {
     var days = Math.round(years * 365.25);
@@ -7194,8 +7350,13 @@ tr.hidden-row{display:none}
   function mpQuantile(sorted, q) { var p = (sorted.length - 1) * q, lo = Math.floor(p), hi = Math.ceil(p); return sorted[lo] + (sorted[hi] - sorted[lo]) * (p - lo); }
   function mpRound(x, d) { var k = Math.pow(10, d); return Math.round(x * k) / k; }
   var MP_MODELS = [['ret', '報酬模型', '未來20日報酬'], ['risk', '風險模型', '未來20日最大跌幅']];
-  var MP_SCHEMES = [['積極（30/40/50/65/80%）', [30, 40, 50, 65, 80]], ['溫和（50/55/60/65/70%）', [50, 55, 60, 65, 70]]], MP_VT_NAME = '波動率目標（不靠模型）';
+  var MP_SCHEMES = [['積極（30/40/50/65/80%）', [30, 40, 50, 65, 80]], ['溫和（50/55/60/65/70%）', [50, 55, 60, 65, 70]], ['逆向（80/65/50/40/30%）', [80, 65, 50, 40, 30]]], MP_VT_NAME = '波動率目標（不靠模型）';
   // kind='ret'：預測未來20日報酬（權重每半年從資料重學）；'risk'：預測未來20日期間最大跌幅（依 MP_RISK_PRIOR 固定方向、不擬合）
+  // 2026-11-04 大盤回測另外列出 40／60 日後報酬（模型仍以 20 日訓練）
+  var MP_EXT_H = [40, 60], MP_EXT = {};
+  function mpRetH(c, h) { var out = c.map(function() { return NaN; }); for (var i = 0; i + h < c.length; i++) out[i] = (c[i + h] / c[i] - 1) * 100; return out; }
+  function mpExtMean(h, ids) { var a = MP_EXT[h]; if (!a) return null; var v = ids.map(function(i) { return a[i]; }).filter(function(x) { return isFinite(x); });
+    return v.length >= 20 ? mpRound(v.reduce(function(s, x) { return s + x; }, 0) / v.length, 2) : null; }
   function mpModel(X, y, r, dd, n, idx, kind, fixed) {
     var k = X.length, pred = y.map(function() { return NaN; }), qwf = y.map(function() { return -1; }), folds = [], stH = X.map(function() { return 0; }), stN = X.map(function() { return 0; });
     for (var t = MP_WARM; t < n; t += MP_STEP) {
@@ -7216,15 +7377,16 @@ tr.hidden-row{display:none}
       folds.push({ start: idx[t], w: w.map(function(x) { return mpRound(x, 4); }) });
     }
     var p = [], yy = [], rr = [], d = [], first = null;
-    for (i = 0; i < n; i++) if (isFinite(pred[i]) && isFinite(y[i]) && isFinite(r[i])) { p.push(pred[i]); yy.push(y[i]); rr.push(r[i]); d.push(dd[i]); if (!first) first = idx[i]; }
+    var ii = [];
+    for (i = 0; i < n; i++) if (isFinite(pred[i]) && isFinite(y[i]) && isFinite(r[i])) { p.push(pred[i]); yy.push(y[i]); rr.push(r[i]); d.push(dd[i]); ii.push(i); if (!first) first = idx[i]; }
     var m = { kind: kind, n_oos: p.length, valid: false };
     if (p.length < 250) return { m: m, q: qwf };
     m.oos_start = first; m.oos_ic = mpRound(mpSpear(p, yy), 3);
     var ps = p.slice().sort(function(a, b) { return a - b; }), edges = [0.2, 0.4, 0.6, 0.8].map(function(q) { return mpQuantile(ps, q); });
     var qOf = function(v) { var c = 0; edges.forEach(function(e) { if (v >= e) c++; }); return c; };
-    var tb = [0, 1, 2, 3, 4].map(function() { return { n: 0, s: 0, up: 0, d5: 0, md: 0 }; });
-    p.forEach(function(v, j) { var g = tb[qOf(v)]; g.n++; g.s += rr[j]; if (rr[j] > 0) g.up++; if (d[j] <= -5) g.d5++; g.md += d[j]; });
-    m.quint = tb.map(function(g) { return { n: g.n, ret: mpRound(g.s / g.n, 2), up: mpRound(g.up / g.n * 100, 1), dd5: mpRound(g.d5 / g.n * 100, 1), mdd: mpRound(g.md / g.n, 2) }; });
+    var tb = [0, 1, 2, 3, 4].map(function() { return { n: 0, s: 0, up: 0, d5: 0, md: 0, ids: [] }; });
+    p.forEach(function(v, j) { var g = tb[qOf(v)]; g.n++; g.s += rr[j]; if (rr[j] > 0) g.up++; if (d[j] <= -5) g.d5++; g.md += d[j]; g.ids.push(ii[j]); });
+    m.quint = tb.map(function(g) { return { n: g.n, ret: mpRound(g.s / g.n, 2), up: mpRound(g.up / g.n * 100, 1), dd5: mpRound(g.d5 / g.n * 100, 1), mdd: mpRound(g.md / g.n, 2), ret40: mpExtMean(40, g.ids), ret60: mpExtMean(60, g.ids) }; });
     m.mono = mpRound(mpSpear([0, 1, 2, 3, 4], m.quint.map(function(x) { return kind === 'ret' ? x.ret : x.mdd; }), 3), 2);
     m.edges = edges;
     m.valid = m.oos_ic >= 0.05 && m.mono >= 0.7;
@@ -7285,6 +7447,7 @@ tr.hidden-row{display:none}
   function mpWalkforward(F, c, market) {
     var cols = F.names, raw = cols.map(function(nm) { return F.cols[nm]; });
     var X = raw.map(mpPctExpanding), T = mpTargets(c), r = T.r, dd = T.d, n = r.length;
+    MP_EXT = {}; MP_EXT_H.forEach(function(h) { MP_EXT[h] = mpRetH(c, h); });
     var rep = { market: market, built: mpIso(new Date()), start: F.index[0], end: F.index[n - 1], cols: cols, models: {} };
     var pri = cols.map(function(nm) { return MP_RISK_PRIOR[nm] || 0; }), hasPri = pri.some(function(x) { return x; });
     var qw = {};
@@ -7297,12 +7460,15 @@ tr.hidden-row{display:none}
     for (var i = MP_WARM; i < n; i++) if (isFinite(r[i])) { rs.push(r[i]); ds.push(dd[i]); }
     rep.base = { ret: mpRound(rs.reduce(function(s, x) { return s + x; }, 0) / rs.length, 2), up: mpRound(rs.filter(function(x) { return x > 0; }).length / rs.length * 100, 1),
       dd5: mpRound(ds.filter(function(x) { return x <= -5; }).length / ds.length * 100, 1), mdd: mpRound(ds.reduce(function(s, x) { return s + x; }, 0) / ds.length, 2) };
+    var okIds = []; for (var iq = MP_WARM; iq < n; iq++) if (isFinite(r[iq])) okIds.push(iq);
+    rep.base.ret40 = mpExtMean(40, okIds); rep.base.ret60 = mpExtMean(60, okIds);
     mpSimulate(rep, F, c, qw);
     rep.valid = !!rep.pick;
     rep.ref = raw.map(function(col) { return col.filter(function(x) { return isFinite(x); }).map(function(x) { return mpRound(x, 4); }).sort(function(a, b) { return a - b; }); });
     rep.w = true;
     var lv = {}; cols.forEach(function(nm, j) { lv[nm] = raw[j][n - 1]; });
     rep.now = mpReading(rep, lv, F.index[n - 1]);
+    try { rep.heat = heatBacktest(cols, raw, X, r, dd); } catch (eH) { rep.heat = { err: eH.message }; }   // 2026-11-04 訊號燈門檻回測
     return rep;
   }
   function mpReadModel(m, pcts) {
@@ -7315,6 +7481,11 @@ tr.hidden-row{display:none}
     det.sort(function(a, b) { return Math.abs(b.contrib) - Math.abs(a.contrib); });
     return { score: mpRound(s, 3), q: q + 1, ret: qt.ret, up: qt.up, dd5: qt.dd5, mdd: qt.mdd, valid: m.valid, oos_ic: m.oos_ic, top: det.slice(0, 3) };
   }
+  // 2026-11-04 持股策略偏好（存在這個瀏覽器）
+  function getMpPref() { var el = document.getElementById('iMpPref'); return el ? el.value : 'balance'; }
+  (function() { var el = document.getElementById('iMpPref'); if (!el) return;
+    try { var v = localStorage.getItem('twMpPref'); if (v && v !== 'contra') el.value = v; } catch (e) {}   // 2026-11-04 逆向加碼已移除
+    el.addEventListener('change', function() { try { localStorage.setItem('twMpPref', el.value); } catch (e) {} }); })();
   function mpReading(sc, vals, asof) {
     if (!sc || !sc.models) return null;
     var pcts = [], det = [];
@@ -7326,6 +7497,12 @@ tr.hidden-row{display:none}
     });
     var rd = {}, pk = sc.pick, pos = null;
     MP_MODELS.forEach(function(md) { if (sc.models[md[0]]) rd[md[0]] = mpReadModel(sc.models[md[0]], pcts); });
+    var pref = getMpPref();
+    if (pref === 'ret') return { asof: asof, models: rd, pos: 100, valid: true, pick: '報酬優先：永遠滿倉（只看個股訊號）', det: det };
+    if (pref === 'balance' && rd.risk && sc.models.risk && sc.models.risk.valid)
+      return { asof: asof, models: rd, pos: [50, 55, 60, 65, 70][rd.risk.q - 1], valid: true, pick: '平衡：風險模型・溫和（50/55/60/65/70%）', det: det };
+    if (pref === 'contra' && rd.risk && sc.models.risk && sc.models.risk.valid)
+      return { asof: asof, models: rd, pos: [80, 65, 50, 40, 30][rd.risk.q - 1], valid: true, pick: '逆向加碼：風險模型・逆向（80/65/50/40/30%）', det: det };
     if (pk && pk.kind === 'model' && rd[pk.model]) pos = pk.pos[rd[pk.model].q - 1];
     else if (pk && pk.kind === 'vt' && sc.vt_med) { var vn = vals['60日波動率%']; if (vn != null && isFinite(vn) && vn > 0) pos = Math.round(Math.min(1, Math.max(0.3, sc.vt_med / vn)) * 100 / 5) * 5; }
     return { asof: asof, models: rd, pos: pos, valid: pos != null, pick: pk ? pk.name : null, det: det };
@@ -7370,9 +7547,9 @@ tr.hidden-row{display:none}
       var m = rep.models[md[0]]; if (!m || !m.quint) return;
       h += '<div style="font-size:14px;font-weight:700;color:#fff;margin-top:14px">' + md[1] + '（預測' + md[2] + (m.fixed ? '，依市場常識固定方向、不擬合' : '，權重每半年從資料重學') + '）</div>' +
         '<div style="margin:6px 0;font-weight:700;color:' + (m.valid ? '#4caf50' : '#ff9800') + '">' + (m.valid ? '✅ 樣本外驗證有效' : '⚠️ 樣本外驗證未通過') + '：IC ' + mpSigned(m.oos_ic, 3) + '、五級單調度 ' + mpSigned(m.mono, 2) + (m.valid ? ' → 可用，持股對照表看下方「持股策略模擬」' : '（需要 IC≥0.05 且單調度≥0.7）→ 不採用') + '</div>' +
-        '<table style="border-collapse:collapse;width:100%;margin-bottom:8px"><tr>' + th('級別') + th('天數') + th('未來20日平均報酬%') + th('上漲機率%') + th('期間跌≥5%機率%') + th('平均最大跌幅%') + th('建議持股%') + '</tr>' +
-        m.quint.map(function(x, k) { return '<tr>' + td('第' + (k + 1) + '級' + (k === 0 ? '（最差）' : k === 4 ? '（最好）' : '')) + td(x.n) + td(mpSigned(x.ret, 2), 'color:' + (x.ret >= 0 ? '#ef5350' : '#26a69a')) + td(x.up) + td(x.dd5) + td(x.mdd) + td(m.valid ? (rep.pick && rep.pick.model === md[0] ? rep.pick.pos[k] : '—') : '不採用', m.valid ? '' : 'color:#666') + '</tr>'; }).join('') +
-        '<tr>' + td('全部（永遠持有）', 'color:#888') + td(rep.n_oos) + td(mpSigned(rep.base.ret, 2)) + td(rep.base.up) + td(rep.base.dd5) + td(rep.base.mdd) + td('') + '</tr></table>';
+        '<table style="border-collapse:collapse;width:100%;margin-bottom:8px"><tr>' + th('級別') + th('天數') + th('未來20日平均報酬%') + th('未來40日%') + th('未來60日%') + th('上漲機率%') + th('期間跌≥5%機率%') + th('平均最大跌幅%') + th('建議持股%') + '</tr>' +
+        m.quint.map(function(x, k) { return '<tr>' + td('第' + (k + 1) + '級' + (k === 0 ? '（最差）' : k === 4 ? '（最好）' : '')) + td(x.n) + td(mpSigned(x.ret, 2), 'color:' + (x.ret >= 0 ? '#ef5350' : '#26a69a')) + td(x.ret40 == null ? null : mpSigned(x.ret40, 2)) + td(x.ret60 == null ? null : mpSigned(x.ret60, 2)) + td(x.up) + td(x.dd5) + td(x.mdd) + td(m.valid ? (rep.pick && rep.pick.model === md[0] ? rep.pick.pos[k] : '—') : '不採用', m.valid ? '' : 'color:#666') + '</tr>'; }).join('') +
+        '<tr>' + td('全部（永遠持有）', 'color:#888') + td(rep.n_oos) + td(mpSigned(rep.base.ret, 2)) + td(rep.base.ret40 == null ? null : mpSigned(rep.base.ret40, 2)) + td(rep.base.ret60 == null ? null : mpSigned(rep.base.ret60, 2)) + td(rep.base.up) + td(rep.base.dd5) + td(rep.base.mdd) + td('') + '</tr></table>';
     });
     if (rep.sim) {
       var pk = rep.pick;
@@ -7387,6 +7564,7 @@ tr.hidden-row{display:none}
       '<table style="border-collapse:collapse;width:100%;margin-bottom:12px"><tr>' + th('指標') + MP_MODELS.map(function(md) { return th(md[1] + 'IC') + th(md[1] + '權重') + th(md[1] + '一致率'); }).join('') + '</tr>' +
       rep.cols.map(function(nm, j) { return '<tr>' + td(nm) + MP_MODELS.map(function(md) { var m = rep.models[md[0]] || {}; if (!m.w) return td('') + td('') + td('');
         return td(m.ic[j]) + td(m.w[j], m.w[j] ? 'color:#ffd54f;font-weight:700' : 'color:#666') + td(m.stab[j] != null ? m.stab[j] + '%（' + m.nf[j] + '段）' : '—'); }).join('') + '</tr>'; }).join('') + '</table>';
+    h += heatBacktestHtml(rep.heat, th, td);
     if (rep.now) {
       var L = mpPanelText(rep.now);
       h += '<div style="margin:8px 0"><b>' + L[0] + ' ' + L[1] + '：<span style="color:#ffd54f">' + L[2] + '</span></b>　<span style="color:#9aa3b2">' + L[3] + '</span></div>' +
@@ -7404,7 +7582,12 @@ tr.hidden-row{display:none}
       if (!token) { alert('請先輸入 API Key'); return; }
       var yrs = Math.max(8, Math.min(20, parseFloat(document.getElementById('iMpYears').value) || 15)), old = b.textContent;
       b.disabled = true; b.textContent = '⏳ 抓取大盤歷史並做樣本外驗證中…';
-      try { var rep = await mpBuild(token, yrs); if (rep.models && !rep.msg) mpSave(rep); mpRenderReport(rep); }
+      try {
+        var rep = await mpBuild(token, yrs), oldMp = mpLoad();
+        if (rep.models && !rep.msg && (rep.valid || !(oldMp && oldMp.valid))) mpSave(rep);
+        else if (rep.models && !rep.msg) alert('⚠️ 這次重建的評分卡沒有通過驗證，批次分析繼續使用上一張通過的評分卡（' + (oldMp.built || '') + ' 建立），建議持股才不會大跳。下方顯示的是這次重建的結果，僅供比較。');
+        mpRenderReport(rep);
+      }
       catch (e) { alert('大盤預測回測失敗：' + e.message); }
       b.disabled = false; b.textContent = old;
     });
@@ -8265,7 +8448,7 @@ tr.hidden-row{display:none}
             rets[h] = (idx + h < n && entryClose) ? (data[idx + h].close - entryClose) / entryClose * 100 : null;
           });
 
-          backtestResults.push({
+          backtestResults.push(Object.assign({
             evalDate: evalDate, stockId: sid, name: name, score: dm.score,
             plusDI: dm.plusDI, minusDI: dm.minusDI, adx: dm.adx, adxr: dm.adxr, bbPos: sig.bbPos,
             isBreakout: sig.isBreakout ? 1 : 0, isPullbackRebound: sig.isPullbackRebound ? 1 : 0,
@@ -8302,7 +8485,7 @@ tr.hidden-row{display:none}
             bigChg4w: c2F.bigChg4w, pplChg4w: c2F.pplChg4w, sblChg20: c2F.sblChg20, fxOI: c2F.fxOI, mktMgChg20: c2F.mktMgChg20, inst3m: inst3m, trust5: flow.trust5, foreign5: flow.foreign5, trustStreak3: flow.trustStreak3,
             entryClose: entryClose,
             ret5d: rets[5], ret10d: rets[10], ret20d: rets[20],
-          });
+          }, exitFeats(data, idx)));   // 2026-11-04 出場規則回測欄位（跟美股同一套）
           saved++;
         }
       } catch (ex) {
